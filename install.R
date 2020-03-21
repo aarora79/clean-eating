@@ -4,11 +4,10 @@ install.packages("shiny")
 install.packages("tidyverse")
 install.packages("flexdashboard")
 install.packages("devtools")
-devtools::install_github("ricardo-bion/ggradar", 
-                         dependencies = TRUE)
 install.packages("plotly")
 install.packages("hrbrthemes")
-
 install.packages("GGally")
-
 install.packages("viridis")
+install.packages("forecast")
+install.packages("glue")
+devtools::install_github("kassambara/ggcorrplot")
