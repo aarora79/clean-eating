@@ -18,6 +18,8 @@ library(heatmaply)
 library(ggthemes)
 library(glue)
 library(shiny)
+library(ggwaffle)
+library(patchwork)
 # global constants
 RAW_DATA_DIR <- "./raw_data/"
 RAW_DATA_FILE_NAME <- "data.csv"
@@ -31,12 +33,32 @@ df <- df %>%
   arrange(date)
 # what does it look like?
 summary(df)
+
+df_wt_loss <- df %>%
+  select(name, date, weight) %>%
+  group_by(name) %>%
+  arrange(date, .by_group=TRUE) %>%
+  mutate(loss_per_day = weight-lag(weight, 1)) 
+# is the curse of the weekend real?
+df_wt_loss <- df_wt_loss %>%
+  mutate(day = weekdays(as.Date(date))) %>%
+  mutate(day_after_weekend = ifelse(day %in% c("Monday", "Tuesday"), TRUE, FALSE))
+df_wt_loss
+
+
+df_wt_loss_by_day <- df_wt_loss %>%
+  group_by(name, day) %>%
+  summarize(median_wt_loss = median(loss_per_day, na.rm=T))
+df_wt_loss_by_day$day <- factor(df_wt_loss_by_day$day,
+                                levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+
 ```
 
 Column {data-width=600}
 -----------------------------------------------------------------------
 
-### How did we do? Just give me the easy plot.
+### How did we do? Just give me the easy plots.
 ```{r}
 renderPlot({
   df_tidy <- df %>%
@@ -60,7 +82,8 @@ renderPlot({
     xlab("") +
     ylab("") +
     theme_bw() +
-    theme(legend.position = "bottom", legend.title = element_blank())
+    theme(legend.position = "bottom", legend.title = element_blank()) + 
+    scale_color_tableau() #(palette = "Dark2")
 })
 
 ```
@@ -68,8 +91,8 @@ renderPlot({
 
 Column {data-width=400}
 -----------------------------------------------------------------------
-### Description
-The sunburst diagram has the high schools in the innermost donut chart, followed the community college followed by the course name. Hover over the outermost layer to see the complete sequence from High School -> Community College -> Course. 
+### How do the overall numbers compare for Amit and Nidhi?
+Other than on overall weight loss and BMI reduction, Nidhi performed better than Amit. 
 ```{r}
 renderPlot({
   df_change_amit <- df %>%
@@ -110,52 +133,60 @@ ggplot(df_change , aes(x = metric, y = abs_change, fill = name)) +   # Fill colu
   scale_y_continuous(breaks = brks,   # Breaks
                      labels = lbls) + # Labels
   coord_flip() +  # Flip axes
-  labs(title="Email Campaign Funnel") +
-  theme_tufte() +  # Tufte theme from ggfortify
+  labs(title="Comparing absolute change across all metrics") +
+  theme_bw() +  # Tufte theme from ggfortify
+  ylab("") + 
+  xlab("") +
   theme(plot.title = element_text(hjust = .5), 
         axis.ticks = element_blank()) +   # Centre plot title
-  scale_fill_brewer(palette = "Dark2")  # Color palette
+  scale_fill_tableau() + # Color palette palette = "Dark2"
+theme(legend.position = "right", legend.title = element_blank())
   
 })
 
 ```
 
-### Sankey diagram
+### How many days did we lose/gain weight?
 
-Provides an alternate visualization for the same dataset. Click on the image to open the Sankey diagram. 
+It appears that Friday and Sunday for both of us were the worst and Tuesday's were the best. 
 ```{r}
 renderPlot({
-  df_wt_loss <- df %>%
-  select(name, date, weight) %>%
-  group_by(name) %>%
-  arrange(date, .by_group=TRUE) %>%
-  mutate(loss_per_day = weight-lag(weight, 1)) 
-
-df_wt_loss %>%
+  df_wt_loss_result <- df_wt_loss %>%
   drop_na() %>%
-  group_by(name) %>%
-  summarize(median_wt_loss_per_day=median(loss_per_day))
-median_wt_loss_per_day_amit <- round(median(df_wt_loss[df_wt_loss$name == "Amit", ]$loss_per_day, na.rm=TRUE), 2)
-median_wt_loss_per_day_nidhi <- round(median(df_wt_loss[df_wt_loss$name == "Nidhi", ]$loss_per_day, na.rm=TRUE), 2)
+  mutate(wt_loss_result = ifelse(loss_per_day < 0,
+                                 "lost", 
+                                 ifelse(loss_per_day == 0, "same", "gained"))) %>%
+  select(name, wt_loss_result)
+df_wt_loss_result
+waffle_data <- waffle_iron(df_wt_loss_result %>% filter(name=="Nidhi"), aes_d(group = wt_loss_result))
 
+p1 <- ggplot(waffle_data, aes(x, y, fill = group)) + 
+  geom_waffle() + 
+  coord_equal() + 
+  scale_fill_tableau() + 
+  theme_waffle()+ 
+  labs(title="Nidhi") + xlab("") + ylab("") +  
+  theme(legend.position = "bottom",  legend.title = element_blank())
 
-p <- df_wt_loss %>%
-  drop_na() %>%
-  ggplot(aes(x=name, y=loss_per_day)) + 
-  geom_boxplot() + 
-  geom_dotplot(binaxis='y', 
-               stackdir='center', 
-               dotsize = .5, 
-               aes(fill=name)) +
-  #theme(axis.text.x = element_text(angle=0, vjust=0.6)) + 
-  labs(title="Distribution of per day weight loss (in pounds)", 
-       subtitle=glue("Median weight loss per day, Amit={median_wt_loss_per_day_amit} pounds, Nidhi={median_wt_loss_per_day_nidhi} pounds"),
-       caption="Source: Data collected during clean eating 30day challenge",
-       x="",
-       y="Weight loss per day in pounds (-ve represents loss)") + 
+waffle_data <- waffle_iron(df_wt_loss_result %>% filter(name=="Amit"), aes_d(group = wt_loss_result))
+
+p2 <- ggplot(waffle_data, aes(x, y, fill = group)) + 
+  geom_waffle() + 
+  coord_equal() + 
+  scale_fill_tableau() + 
+  theme_waffle() + 
+  labs(title="Amit") + xlab("") + ylab("") +  
   theme(legend.position = "none")
-p
-  
+
+patchwork <- p1 + p2
+
+patchwork 
+#+ plot_annotation(
+#  title = 'How many days did we lose/gain weight',
+  #subtitle = 'These 3 plots will reveal yet-untold secrets about our beloved data-set',
+  #caption = 'Disclaimer: None of these plots are insightful'
+#)
+
 })
  
 ```

@@ -139,3 +139,57 @@ ggplot(df_change , aes(x = metric, y = abs_change, fill = name)) +   # Fill colu
         axis.ticks = element_blank()) +   # Centre plot title
   scale_fill_brewer(palette = "Dark2")  # Color palette
 
+df_wt_loss_result <- df_wt_loss %>%
+  drop_na() %>%
+  mutate(wt_loss_result = ifelse(loss_per_day < 0,
+                                 "lost", 
+                                 ifelse(loss_per_day == 0, "same", "gained"))) %>%
+  select(name, wt_loss_result)
+df_wt_loss_result
+waffle_data<- waffle_iron(df_wt_loss_result %>% filter(name=="Nidhi"), aes_d(group = wt_loss_result))
+
+p1 <- ggplot(waffle_data, aes(x, y, fill = group)) + 
+  geom_waffle() + 
+  coord_equal() + 
+  scale_fill_tableau() + 
+  theme_waffle()+ 
+  labs(title="Nidhi") + xlab("") + ylab("") +  
+  theme(legend.position = "bottom",  legend.title = element_blank())
+
+waffle_data <- waffle_iron(df_wt_loss_result %>% filter(name=="Amit"), aes_d(group = wt_loss_result))
+
+p2 <- ggplot(waffle_data, aes(x, y, fill = group)) + 
+  geom_waffle() + 
+  coord_equal() + 
+  scale_fill_tableau() + 
+  theme_waffle() + 
+  labs(title="Amit") + xlab("") + ylab("") +  
+  theme(legend.position = "none")
+
+patchwork <- p1 + p2
+
+patchwork + plot_annotation(
+  title = 'How many days did we lose/gain weight',
+  #subtitle = 'These 3 plots will reveal yet-untold secrets about our beloved data-set',
+  #caption = 'Disclaimer: None of these plots are insightful'
+)
+
+library(ggplot2)
+library(patchwork)
+
+p1 <- ggplot(mtcars) + geom_point(aes(mpg, disp))
+p2 <- ggplot(mtcars) + geom_boxplot(aes(gear, disp, group = gear))
+
+p1 + p2
+
+library(ggwaffle)
+iris$Species <- as.character(iris$Species)
+waffle_data <- waffle_iron(iris, aes_d(group = Species))
+ggplot(waffle_data, aes(x, y, fill = group)) + 
+  geom_waffle() + 
+  coord_equal() 
+ggplot(waffle_data, aes(x, y, fill = group)) + 
+  geom_waffle() + 
+  coord_equal() + 
+  scale_fill_waffle() + 
+  theme_waffle() 
