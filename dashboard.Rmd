@@ -1,0 +1,163 @@
+---
+title: "Analyzing Clean Eating Month Results"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    social: menu
+    source_code: embed
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(ggcorrplot)
+library(heatmaply)
+library(ggthemes)
+library(glue)
+library(shiny)
+# global constants
+RAW_DATA_DIR <- "./raw_data/"
+RAW_DATA_FILE_NAME <- "data.csv"
+
+# read the data
+df <- read_csv(file.path(RAW_DATA_DIR, RAW_DATA_FILE_NAME))
+
+df <- df %>%
+  select(-`muscle-percentage`, -`lean-mass`) %>%
+  drop_na() %>%
+  arrange(date)
+# what does it look like?
+summary(df)
+```
+
+Column {data-width=600}
+-----------------------------------------------------------------------
+
+### How did we do? Just give me the easy plot.
+```{r}
+renderPlot({
+  df_tidy <- df %>%
+    rename(`bmi (kg/m^2)`=bmi, `weight (pounds)`=weight) %>%
+    gather(metric, value, -date, -name)
+  
+  df_tidy$metric <- factor(df_tidy$metric,
+                           levels = c("weight (pounds)",
+                                      "bmi (kg/m^2)",
+                                      "total-lean-mass-percentage",
+                                      "body-fat-percentage",
+                                      "hydration-percentage"))
+  df_tidy <- df_tidy %>%
+    arrange(metric)
+    
+  df_tidy %>%
+    ggplot(aes(x=date, y=value, col=name)) +
+    geom_point() +
+    geom_smooth(method = "lm") +
+    facet_wrap(~metric, scales="free_y") + 
+    xlab("") +
+    ylab("") +
+    theme_bw() +
+    theme(legend.position = "bottom", legend.title = element_blank())
+})
+
+```
+
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+### Description
+The sunburst diagram has the high schools in the innermost donut chart, followed the community college followed by the course name. Hover over the outermost layer to see the complete sequence from High School -> Community College -> Course. 
+```{r}
+renderPlot({
+  df_change_amit <- df %>%
+  gather(key, value, -name, -date) %>%
+  filter(name=="Amit") %>%
+  filter(date==min(date) | date==max(date)) %>%
+  spread(date, value)
+colnames(df_change_amit) <- c("name", "metric", "value_at_start", "value_at_end")
+df_change_amit <- df_change_amit %>%
+  mutate(abs_change = abs(value_at_end-value_at_start)) %>%
+  select(-value_at_end, -value_at_start)
+  
+
+df_change_nidhi <- df %>%
+  gather(key, value, -name, -date) %>%
+  filter(name=="Nidhi") %>%
+  filter(date==min(date) | date==max(date)) %>%
+  spread(date, value)
+colnames(df_change_nidhi) <- c("name", "metric", "value_at_start", "value_at_end")
+df_change_nidhi
+df_change_nidhi <- df_change_nidhi %>%
+  mutate(abs_change = -abs(value_at_end-value_at_start)) %>%
+  select(-value_at_end, -value_at_start)
+
+df_change <- bind_rows(df_change_amit, df_change_nidhi) %>%
+  arrange((abs_change))
+
+df_change$metric <- factor(df_change$metric, levels = c("weight", "bmi", "total-lean-mass-percentage", "body-fat-percentage", "hydration-percentage"))
+df_change <- df_change %>%
+  arrange(desc(metric))
+# X Axis Breaks and Labels 
+brks <- seq(-15, 15, 1)
+lbls = paste0(as.character(c(seq(15, 0, -1), seq(1, 15, 1))), "")
+
+# Plot
+ggplot(df_change , aes(x = metric, y = abs_change, fill = name)) +   # Fill column
+  geom_bar(stat = "identity", width = .6) +   # draw the bars
+  scale_y_continuous(breaks = brks,   # Breaks
+                     labels = lbls) + # Labels
+  coord_flip() +  # Flip axes
+  labs(title="Email Campaign Funnel") +
+  theme_tufte() +  # Tufte theme from ggfortify
+  theme(plot.title = element_text(hjust = .5), 
+        axis.ticks = element_blank()) +   # Centre plot title
+  scale_fill_brewer(palette = "Dark2")  # Color palette
+  
+})
+
+```
+
+### Sankey diagram
+
+Provides an alternate visualization for the same dataset. Click on the image to open the Sankey diagram. 
+```{r}
+renderPlot({
+  df_wt_loss <- df %>%
+  select(name, date, weight) %>%
+  group_by(name) %>%
+  arrange(date, .by_group=TRUE) %>%
+  mutate(loss_per_day = weight-lag(weight, 1)) 
+
+df_wt_loss %>%
+  drop_na() %>%
+  group_by(name) %>%
+  summarize(median_wt_loss_per_day=median(loss_per_day))
+median_wt_loss_per_day_amit <- round(median(df_wt_loss[df_wt_loss$name == "Amit", ]$loss_per_day, na.rm=TRUE), 2)
+median_wt_loss_per_day_nidhi <- round(median(df_wt_loss[df_wt_loss$name == "Nidhi", ]$loss_per_day, na.rm=TRUE), 2)
+
+
+p <- df_wt_loss %>%
+  drop_na() %>%
+  ggplot(aes(x=name, y=loss_per_day)) + 
+  geom_boxplot() + 
+  geom_dotplot(binaxis='y', 
+               stackdir='center', 
+               dotsize = .5, 
+               aes(fill=name)) +
+  #theme(axis.text.x = element_text(angle=0, vjust=0.6)) + 
+  labs(title="Distribution of per day weight loss (in pounds)", 
+       subtitle=glue("Median weight loss per day, Amit={median_wt_loss_per_day_amit} pounds, Nidhi={median_wt_loss_per_day_nidhi} pounds"),
+       caption="Source: Data collected during clean eating 30day challenge",
+       x="",
+       y="Weight loss per day in pounds (-ve represents loss)") + 
+  theme(legend.position = "none")
+p
+  
+})
+ 
+```
+
+

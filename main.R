@@ -3,6 +3,7 @@ library(dplyr)
 library(ggplot2)
 library(tidyverse)
 library(ggcorrplot)
+library(heatmaply)
 # global constants
 RAW_DATA_DIR <- "./raw_data/"
 RAW_DATA_FILE_NAME <- "data.csv"
@@ -22,7 +23,8 @@ df_tidy <- df %>%
 head(df_tidy)
 p <- df_tidy %>%
   ggplot(aes(x=date, y=value, col=name)) +
-  geom_line() +
+  geom_point() +
+  geom_smooth(method = "lm") +
   facet_wrap(~metric, scales="free_y") + 
   #facet_grid(metric~name, scales="free_y") +
   theme_bw() +
@@ -74,4 +76,66 @@ df_wt_loss %>%
 
 
 
+
+
+heatmaply(
+  (mtcars),
+  xlab = "Features",
+  ylab = "Cars", 
+  main = "Data transformation using 'normalize'"
+)
+
+df_wt_loss_by_day <- df_wt_loss %>%
+  group_by(name, day) %>%
+  summarize(median_wt_loss = median(loss_per_day, na.rm=T))
+df_wt_loss_by_day$day <- factor(df_wt_loss_by_day$day, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+
+df_wt_loss_by_day %>%
+  arrange(day) %>%
+  ggplot(aes(x=day, y=median_wt_loss, fill=name)) +
+  geom_bar(stat="identity", position="dodge")
+
+df_change_amit <- df %>%
+  gather(key, value, -name, -date) %>%
+  filter(name=="Amit") %>%
+  filter(date==min(date) | date==max(date)) %>%
+  spread(date, value)
+colnames(df_change_amit) <- c("name", "metric", "value_at_start", "value_at_end")
+df_change_amit <- df_change_amit %>%
+  mutate(abs_change = abs(value_at_end-value_at_start)) %>%
+  select(-value_at_end, -value_at_start)
+  
+
+df_change_nidhi <- df %>%
+  gather(key, value, -name, -date) %>%
+  filter(name=="Nidhi") %>%
+  filter(date==min(date) | date==max(date)) %>%
+  spread(date, value)
+colnames(df_change_nidhi) <- c("name", "metric", "value_at_start", "value_at_end")
+df_change_nidhi
+df_change_nidhi <- df_change_nidhi %>%
+  mutate(abs_change = -abs(value_at_end-value_at_start)) %>%
+  select(-value_at_end, -value_at_start)
+
+df_change <- bind_rows(df_change_amit, df_change_nidhi) %>%
+  arrange((abs_change))
+
+df_change$metric <- factor(df_change$metric, levels = c("weight", "bmi", "total-lean-mass-percentage", "body-fat-percentage", "hydration-percentage"))
+df_change <- df_change %>%
+  arrange(desc(metric))
+# X Axis Breaks and Labels 
+brks <- seq(-15, 15, 1)
+lbls = paste0(as.character(c(seq(15, 0, -1), seq(1, 15, 1))), "")
+
+# Plot
+ggplot(df_change , aes(x = metric, y = abs_change, fill = name)) +   # Fill column
+  geom_bar(stat = "identity", width = .6) +   # draw the bars
+  scale_y_continuous(breaks = brks,   # Breaks
+                     labels = lbls) + # Labels
+  coord_flip() +  # Flip axes
+  labs(title="Email Campaign Funnel") +
+  theme_economist() +  # Tufte theme from ggfortify
+  theme(plot.title = element_text(hjust = .5), 
+        axis.ticks = element_blank()) +   # Centre plot title
+  scale_fill_brewer(palette = "Dark2")  # Color palette
 
