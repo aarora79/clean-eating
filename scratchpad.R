@@ -2,7 +2,7 @@ library(tidyr)
 library(dplyr)
 library(ggplot2)
 library(tidyverse)
-
+library(ggcorrplot)
 # global constants
 RAW_DATA_DIR <- "./raw_data/"
 RAW_DATA_FILE_NAME <- "data.csv"
@@ -31,8 +31,7 @@ p
 rownames(df) <- df$name 
 corr <- round(cor(df %>% select(-date, -name)), 1)
 
-library(ggplot2)
-library(ggcorrplot)
+
 
 # Correlation matrix
 #data(mtcars)
