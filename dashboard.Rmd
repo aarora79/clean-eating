@@ -1,25 +1,26 @@
 ---
 title: "Analyzing Clean Eating Month Results"
-output: 
-  flexdashboard::flex_dashboard:
-    orientation: columns
-    social: menu
-    source_code: embed
+output:
+  flexdashboard::flex_dashboard: null
+  orientation: columns
+  vertical_layout: fill
+social: menu
+source_code: embed
 runtime: shiny
+resource_files:
+- raw_data/data.csv
+- raw_data/data.csv
 ---
-
+  
 ```{r setup, include=FALSE}
 library(tidyr)
 library(dplyr)
 library(ggplot2)
 library(tidyverse)
-library(ggcorrplot)
-library(heatmaply)
 library(ggthemes)
 library(glue)
 library(shiny)
-library(ggwaffle)
-library(patchwork)
+
 # global constants
 RAW_DATA_DIR <- "./raw_data/"
 RAW_DATA_FILE_NAME <- "data.csv"
@@ -27,44 +28,48 @@ RAW_DATA_FILE_NAME <- "data.csv"
 # read the data
 df <- read_csv(file.path(RAW_DATA_DIR, RAW_DATA_FILE_NAME))
 
+# remove some fields for which we know we dont have data
 df <- df %>%
   select(-`muscle-percentage`, -`lean-mass`) %>%
   drop_na() %>%
   arrange(date)
-# what does it look like?
-summary(df)
 
+# determine the per day weight loss dataframe by
+# calculating loss as weight - the one previous value of weight
+# this is done by first grouping the dataframe by name since it has
+# data for two people and then arranging by date while maintaining
+# the grouping (not the .by_group=TRUE)
 df_wt_loss <- df %>%
   select(name, date, weight) %>%
   group_by(name) %>%
   arrange(date, .by_group=TRUE) %>%
   mutate(loss_per_day = weight-lag(weight, 1)) 
-# is the curse of the weekend real?
+
+# is the curse of the weekend real? Assign the day to each date
 df_wt_loss <- df_wt_loss %>%
-  mutate(day = weekdays(as.Date(date))) %>%
-  mutate(day_after_weekend = ifelse(day %in% c("Monday", "Tuesday"), TRUE, FALSE))
-df_wt_loss
-
-
-df_wt_loss_by_day <- df_wt_loss %>%
-  group_by(name, day) %>%
-  summarize(median_wt_loss = median(loss_per_day, na.rm=T))
-df_wt_loss_by_day$day <- factor(df_wt_loss_by_day$day,
-                                levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
-
-
+  mutate(day = weekdays(as.Date(date)))
 ```
 
-Column {data-width=600}
------------------------------------------------------------------------
+Data
+=====================================  
 
+Column {data-width=500}
+-----------------------------------------------------------------------
+  
 ### How did we do? Just give me the easy plots.
 ```{r}
 renderPlot({
+  # convert  the data to tidy (long) format
+  # also rename some columns to add unit
   df_tidy <- df %>%
     rename(`bmi (kg/m^2)`=bmi, `weight (pounds)`=weight) %>%
     gather(metric, value, -date, -name)
   
+  # we would like to arrange the charts in an order
+  # such that weight and bmi appear side by side
+  # easiest way to do this is to convert the name
+  # to a factor and then manually arrange in the desired
+  # order
   df_tidy$metric <- factor(df_tidy$metric,
                            levels = c("weight (pounds)",
                                       "bmi (kg/m^2)",
@@ -73,7 +78,9 @@ renderPlot({
                                       "hydration-percentage"))
   df_tidy <- df_tidy %>%
     arrange(metric)
-    
+  
+  # plot this as a line plot + smoothing line using linear model
+  # facet it with the metric name, color it by person name
   df_tidy %>%
     ggplot(aes(x=date, y=value, col=name)) +
     geom_point() +
@@ -82,113 +89,205 @@ renderPlot({
     xlab("") +
     ylab("") +
     theme_bw() +
-    theme(legend.position = "bottom", legend.title = element_blank()) + 
-    scale_color_tableau() #(palette = "Dark2")
+    theme(legend.position = "bottom",
+          legend.title = element_blank(),
+          strip.text.x = element_text(size = 12)) +
+    scale_color_tableau()
 })
 
 ```
 
 
-Column {data-width=400}
+Column {data-width=500}
 -----------------------------------------------------------------------
-### How do the overall numbers compare for Amit and Nidhi?
-Other than on overall weight loss and BMI reduction, Nidhi performed better than Amit. 
+### I need to see the raw data, show me the numbers not the interpretation!
+
+```{r}
+renderTable({
+  # display the raw data as a table, rename column names
+  # to friendly name
+  df %>%
+    select(-`hydration-percentage`) %>%
+    arrange(desc(date)) %>%
+    mutate(date = as.character(date)) %>%
+    rename(Name=name, Date=date, `Weight (pounds)`=weight,
+           `BMI (kg/m^2)`=bmi,
+           `Body Fat (%)`=`body-fat-percentage`,
+           `Lean mass (%)`=`total-lean-mass-percentage`)
+}, striped=TRUE, hover=TRUE)
+
+```
+
+
+Hypothesis {data-orientation=rows}
+=====================================     
+   
+Row {data-height=500}
+-------------------------------------
+
+### Is the rate of weight loss slowing down?
+Seems like weight loss fatigue is setting as the body had adjusted to the diet and exercise regime.
 ```{r}
 renderPlot({
+  # plot a timeseries of the per day weight loss
+  # alongwith a smoothing line to show the trend
+  df_wt_loss %>%
+    ggplot(aes(x=date, y=loss_per_day, fill=name, color=name)) +
+    geom_point() + 
+    geom_smooth(method = "lm") +
+    theme_bw() +
+    xlab("") +
+    ylab("weight loss in pounds (negative represents loss)") +
+    theme(legend.position = "right",
+          legend.title = element_blank(),
+          strip.text.x = element_text(size = 12)) + 
+    scale_color_tableau() + 
+    scale_fill_tableau()
+})
+```
+
+### Is there such a thing as the "curse of the weekend"?
+Looks like it is true, there is a weight gain on Sunday and only a marginal loss on Monday.
+```{r}
+renderPlot({
+  # plot a per day side by side (for each person)
+  # bar chart showing the median value of the weight loss
+  # on each day of the week
+  df_wt_loss_by_day <- df_wt_loss %>%
+    group_by(name, day) %>%
+    summarize(median_wt_loss = median(loss_per_day, na.rm=T))
+  
+  # arrange the week days in order
+  df_wt_loss_by_day$day <- factor(df_wt_loss_by_day$day,
+                                  levels = c("Monday",
+                                             "Tuesday",
+                                             "Wednesday",
+                                             "Thursday",
+                                             "Friday",
+                                             "Saturday",
+                                             "Sunday"))
+  
+  # plot the bar plot with each day having two side by side bars
+  # not use of stat="identity" since we have the y value for each
+  # bar and position=dodge to show side by side bars
+  df_wt_loss_by_day %>%
+    arrange(day) %>%
+    ggplot(aes(x=day, y=median_wt_loss, fill=name)) +
+    geom_bar(stat="identity", position="dodge")  + 
+    xlab("") + 
+    ylab("Median weight loss (pounds)") + 
+    scale_color_tableau() +
+    scale_fill_tableau() +
+    theme_bw() + 
+    theme(legend.title = element_blank())
+})
+```
+
+Row {data-height=500}
+-------------------------------------
+   
+### Is there a difference in the weight loss patterns for Nidhi and Amit
+Amit's per day weight loss has a lot of variation as compared to Nidhi's.
+```{r}
+renderPlot({
+  # median value of per day weight loss
+  median_wt_loss_per_day_amit <- round(median(df_wt_loss[df_wt_loss$name == "Amit", ]$loss_per_day, na.rm=TRUE), 2)
+  
+  median_wt_loss_per_day_nidhi <- round(median(df_wt_loss[df_wt_loss$name == "Nidhi", ]$loss_per_day, na.rm=TRUE), 2)
+
+  # density plot, col=name so that we get two density plots, one for each person
+  p <- df_wt_loss %>%
+    drop_na() %>%
+    ggplot(aes(loss_per_day, col=name, fill=name)) + 
+    geom_density(alpha = 0.1) +
+    xlab("") + 
+    ylab("Density") + 
+    scale_color_tableau() +
+    scale_fill_tableau() +
+    theme_bw() + 
+    theme(legend.position = "right", legend.title = element_blank()) 
+  
+  # add a text label to the plot at a convenient location (trial and error)
+  # to show median value
+  p + geom_label(
+      label=glue("Median weight loss per day:\n Amit={median_wt_loss_per_day_amit} pounds,   Nidhi={median_wt_loss_per_day_nidhi} pounds"), 
+      x=-2.5,
+      y=0.35,
+      label.padding = unit(0.55, "lines"), # Rectangle size around label
+      label.size = 0.35,
+      color = "black",
+      fill="#69b3a2")
+})
+```   
+    
+### How do Nidhi and Amit compare on every metric?
+Amit lost more weight in absolute terms but on other metrics Nidhi performed better.
+```{r}
+renderPlot({
+  # find initial and final values for each metric for each person
+  # one person at a time and then row bind the dataframes
+  # there is a better way of doing this, but for now this is ok
   df_change_amit <- df %>%
-  gather(key, value, -name, -date) %>%
-  filter(name=="Amit") %>%
-  filter(date==min(date) | date==max(date)) %>%
-  spread(date, value)
-colnames(df_change_amit) <- c("name", "metric", "value_at_start", "value_at_end")
-df_change_amit <- df_change_amit %>%
-  mutate(abs_change = abs(value_at_end-value_at_start)) %>%
-  select(-value_at_end, -value_at_start)
+    gather(key, value, -name, -date) %>%
+    filter(name=="Amit") %>%
+    filter(date==min(date) | date==max(date)) %>%
+    spread(date, value)
+
+  # subtract the first and last values for each metric to get absolute change
+  # in each metric
+  colnames(df_change_amit) <- c("name", "metric", "value_at_start", "value_at_end")
+  df_change_amit <- df_change_amit %>%
+    mutate(abs_change = abs(value_at_end-value_at_start)) %>%
+    select(-value_at_end, -value_at_start)
   
-
-df_change_nidhi <- df %>%
-  gather(key, value, -name, -date) %>%
-  filter(name=="Nidhi") %>%
-  filter(date==min(date) | date==max(date)) %>%
-  spread(date, value)
-colnames(df_change_nidhi) <- c("name", "metric", "value_at_start", "value_at_end")
-df_change_nidhi
-df_change_nidhi <- df_change_nidhi %>%
-  mutate(abs_change = -abs(value_at_end-value_at_start)) %>%
-  select(-value_at_end, -value_at_start)
-
-df_change <- bind_rows(df_change_amit, df_change_nidhi) %>%
-  arrange((abs_change))
-
-df_change$metric <- factor(df_change$metric, levels = c("weight", "bmi", "total-lean-mass-percentage", "body-fat-percentage", "hydration-percentage"))
-df_change <- df_change %>%
-  arrange(desc(metric))
-# X Axis Breaks and Labels 
-brks <- seq(-15, 15, 1)
-lbls = paste0(as.character(c(seq(15, 0, -1), seq(1, 15, 1))), "")
-
-# Plot
-ggplot(df_change , aes(x = metric, y = abs_change, fill = name)) +   # Fill column
-  geom_bar(stat = "identity", width = .6) +   # draw the bars
-  scale_y_continuous(breaks = brks,   # Breaks
-                     labels = lbls) + # Labels
-  coord_flip() +  # Flip axes
-  labs(title="Comparing absolute change across all metrics") +
-  theme_bw() +  # Tufte theme from ggfortify
-  ylab("") + 
-  xlab("") +
-  theme(plot.title = element_text(hjust = .5), 
-        axis.ticks = element_blank()) +   # Centre plot title
-  scale_fill_tableau() + # Color palette palette = "Dark2"
-theme(legend.position = "right", legend.title = element_blank())
+  # repeat for person 2
+  df_change_nidhi <- df %>%
+    gather(key, value, -name, -date) %>%
+    filter(name=="Nidhi") %>%
+    filter(date==min(date) | date==max(date)) %>%
+    spread(date, value)
+  colnames(df_change_nidhi) <- c("name", "metric", "value_at_start", "value_at_end")
   
+  # notice that we are setting the abs value to negative
+  # this is because we want to display the chart such that one person's value
+  # are to the left of zero and the other person to the right of zero
+  # the x axis tick labels are all set to positive so that what the viewer
+  # see is only a positive value indicating absolute change
+  df_change_nidhi <- df_change_nidhi %>%
+    mutate(abs_change = -abs(value_at_end-value_at_start)) %>%
+    select(-value_at_end, -value_at_start)
+
+  # bind the dataframes to get one dataframe with both person's data
+  df_change <- bind_rows(df_change_amit, df_change_nidhi)
+
+  # we want the metics in a particular display order
+  df_change$metric <- factor(df_change$metric, levels = c("weight", 
+                                                          "bmi", 
+                                                          "total-lean-mass-percentage",
+                                                          "body-fat-percentage",
+                                                          "hydration-percentage"))
+  df_change <- df_change %>%
+    arrange(desc(metric))
+
+  # X Axis Breaks and Labels 
+  # the -15 to 15 range is by looking at the data
+  brks <- seq(-15, 15, 1)
+  lbls = paste0(as.character(c(seq(15, 0, -1), seq(1, 15, 1))), "")
+
+  # Plot, see http://r-statistics.co/Top50-Ggplot2-Visualizations-MasterList-R-Code.html for reference
+  ggplot(df_change,
+         aes(x = metric, y = abs_change, fill = name)) +   # Fill column
+    geom_bar(stat = "identity", width = .6) +   # draw the bars
+    scale_y_continuous(breaks = brks,   # Breaks
+                       labels = lbls) + # Labels
+    coord_flip() +  # Flip axes
+    #labs(title="Every metric compared") +
+    ylab("Absolute Change") +
+    xlab("") + 
+    theme_bw() + 
+    theme(plot.title = element_text(hjust = .5), 
+          axis.ticks = element_blank(), legend.title = element_blank()) + 
+    scale_fill_tableau()  # Color palette
 })
 
 ```
-
-### How many days did we lose/gain weight?
-
-It appears that Friday and Sunday for both of us were the worst and Tuesday's were the best. 
-```{r}
-renderPlot({
-  df_wt_loss_result <- df_wt_loss %>%
-  drop_na() %>%
-  mutate(wt_loss_result = ifelse(loss_per_day < 0,
-                                 "lost", 
-                                 ifelse(loss_per_day == 0, "same", "gained"))) %>%
-  select(name, wt_loss_result)
-df_wt_loss_result
-waffle_data <- waffle_iron(df_wt_loss_result %>% filter(name=="Nidhi"), aes_d(group = wt_loss_result))
-
-p1 <- ggplot(waffle_data, aes(x, y, fill = group)) + 
-  geom_waffle() + 
-  coord_equal() + 
-  scale_fill_tableau() + 
-  theme_waffle()+ 
-  labs(title="Nidhi") + xlab("") + ylab("") +  
-  theme(legend.position = "bottom",  legend.title = element_blank())
-
-waffle_data <- waffle_iron(df_wt_loss_result %>% filter(name=="Amit"), aes_d(group = wt_loss_result))
-
-p2 <- ggplot(waffle_data, aes(x, y, fill = group)) + 
-  geom_waffle() + 
-  coord_equal() + 
-  scale_fill_tableau() + 
-  theme_waffle() + 
-  labs(title="Amit") + xlab("") + ylab("") +  
-  theme(legend.position = "none")
-
-patchwork <- p1 + p2
-
-patchwork 
-#+ plot_annotation(
-#  title = 'How many days did we lose/gain weight',
-  #subtitle = 'These 3 plots will reveal yet-untold secrets about our beloved data-set',
-  #caption = 'Disclaimer: None of these plots are insightful'
-#)
-
-})
- 
-```
-
-
